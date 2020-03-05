@@ -261,7 +261,7 @@ void IndexIVF::make_direct_map (bool new_maintain_direct_map)
 }
 
 static size_t test_count = 0;
-static size_t cost_count = 0;
+static double cost_count = 0;
 
 void IndexIVF::search (idx_t n, const float *x, idx_t k,
                          float *distances, idx_t *labels) const
@@ -282,8 +282,8 @@ void IndexIVF::search (idx_t n, const float *x, idx_t k,
 
     test_count += 1;
     cost_count += (getmillisecs() - t0);
-    if (test_count == 10000)
-        printf("n: %d, nprobe: %d, k: %d, cost: %ld\n", n, nprobe, k, cost_count);
+    if (test_count % 10000 == 0)
+        printf("n: %d, nprobe: %d, k: %d, cost: %f\n", n, nprobe, k, cost_count);
 }
 
 
