@@ -277,7 +277,8 @@ void IndexIVF::search (idx_t n, const float *x, idx_t k,
     search_preassigned (n, x, k, idx.get(), coarse_dis.get(),
                         distances, labels, false);
     indexIVF_stats.search_time += getmillisecs() - t0;
-    printf("n: %d, nprobe: %d, k: %d, cost: %d\n", n, nprobe, k, getmillisecs() - t0);
+    size_t cost = getmillisecs() - t0;
+    printf("n: %d, nprobe: %d, k: %d, cost: %ld\n", n, nprobe, k, cost);
 }
 
 
