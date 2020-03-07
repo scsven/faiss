@@ -352,7 +352,8 @@ static void knn_L2sqr_blas (const float * x,
  * KNN driver functions
  *******************************************************/
 
-int distance_compute_blas_threshold = 20;
+//int distance_compute_blas_threshold = 20;
+int distance_compute_blas_threshold = 1100;
 
 void knn_inner_product (const float * x,
         const float * y,
