@@ -261,7 +261,8 @@ void IndexIVF::make_direct_map (bool new_maintain_direct_map)
 }
 
 static size_t test_count = 0;
-static double cost_count = 0;
+static double quantization_cost_count = 0;
+static double search_cost_count = 0;
 
 void IndexIVF::search (idx_t n, const float *x, idx_t k,
                          float *distances, idx_t *labels) const
@@ -273,17 +274,24 @@ void IndexIVF::search (idx_t n, const float *x, idx_t k,
     quantizer->search (n, x, nprobe, coarse_dis.get(), idx.get());
     indexIVF_stats.quantization_time += getmillisecs() - t0;
 
-    t0 = getmillisecs();
+    double t1 = getmillisecs();
     invlists->prefetch_lists (idx.get(), n * nprobe);
 
     search_preassigned (n, x, k, idx.get(), coarse_dis.get(),
                         distances, labels, false);
     indexIVF_stats.search_time += getmillisecs() - t0;
+    double t2 = getmillisecs();
 
     test_count += 1;
-    cost_count += (getmillisecs() - t0);
-    if (test_count % 10000 == 0)
-        printf("n: %d, nprobe: %d, k: %d, cost: %f\n", n, nprobe, k, cost_count);
+    quantization_cost_count += (t1 - t0);
+    search_cost_count += (t2 - t1);
+    if (test_count == 10000) {
+        printf("n: %d, nprobe: %d, k: %d, quantization_cost: %f, search_cost: %f\n", 
+                        n, nprobe, k, quantization_cost_count, search_cost_count);
+        test_count = 0;
+        quantization_cost_count = 0;
+        search_cost_count = 0;
+    }
 }
 
 
