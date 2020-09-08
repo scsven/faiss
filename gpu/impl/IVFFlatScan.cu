@@ -11,6 +11,7 @@
 #include <faiss/gpu/impl/IVFUtils.cuh>
 #include <faiss/gpu/GpuResources.h>
 #include <faiss/gpu/utils/ConversionOperators.cuh>
+#include <faiss/gpu/utils/CopyUtils.cuh>
 #include <faiss/gpu/utils/DeviceDefs.cuh>
 #include <faiss/gpu/utils/DeviceUtils.h>
 #include <faiss/gpu/utils/DeviceTensor.cuh>
@@ -332,31 +333,84 @@ runIVFFlatScanTile(Tensor<float, 2, true>& queries,
 #undef HANDLE_METRICS
 #undef RUN_IVF_FLAT
 
-  // k-select the output in chunks, to increase parallelism
-  runPass1SelectLists(prefixSumOffsets,
-                      allDistances,
-                      listIds.getSize(1),
-                      k,
-                      metricToSortDirection(metricType),
-                      heapDistances,
-                      heapIndices,
-                      stream);
+  // auto min_dist = 2.58573;
+  auto min_dist = 0.0; 
+  auto nq = outDistances.getSize(0);
+  auto topk = outDistances.getSize(1);
 
-  // k-select final output
-  auto flatHeapDistances = heapDistances.downcastInner<2>();
-  auto flatHeapIndices = heapIndices.downcastInner<2>();
+  for (size_t i = 0; i < 2; ++i) {
+    printf("i: %d, min_dist:%f\n", i, min_dist);
 
-  runPass2SelectLists(flatHeapDistances,
-                      flatHeapIndices,
-                      listIndices,
-                      indicesOptions,
-                      prefixSumOffsets,
-                      listIds,
-                      k,
-                      metricToSortDirection(metricType),
-                      outDistances,
-                      outIndices,
-                      stream);
+    auto heapDistance_view = heapDistances.narrow(2, 0 + i * 2048, 2048);
+    auto heapIndices_view = heapIndices.narrow(2, 0 + i * 2048, 2048);
+
+    // k-select the output in chunks, to increase parallelism
+    runPass1SelectLists(prefixSumOffsets,
+                        allDistances,
+                        listIds.getSize(1),
+                        2048,
+                        metricToSortDirection(metricType),
+                        heapDistance_view,
+                        heapIndices_view,
+                        min_dist,
+                        stream);
+
+    // k-select final output
+    auto flatHeapDistances = heapDistances.downcastInner<2>();
+    auto flatHeapIndices = heapIndices.downcastInner<2>();
+
+    //printf("heap: %d %d\n", flatHeapDistances.sizes()[0], flatHeapDistances.sizes()[1]);
+    //printf("narrow: %d %d\n", 0 + i * 2048, 2048);
+
+    flatHeapDistances = flatHeapDistances.narrow(1, 0 + i * 2048, 2048);
+    flatHeapIndices = flatHeapIndices.narrow(1, 0 + i * 2048, 2048);
+
+
+    float *flat_distances = new float[2048];
+    fromDevice<float, 2>(flatHeapDistances, flat_distances, stream);
+    printf("heap: %f %f\n", flat_distances[0], flat_distances[2047]);
+
+
+    //printf("heap: %d %d\n", flatHeapDistances.sizes()[0], flatHeapDistances.sizes()[1]);
+
+    //printf("out: %d %d\n", outDistances.sizes()[0], outDistances.sizes()[1]);
+
+    auto outDistances_view = outDistances.narrow(1, 0 + i * 2048, 2048);
+    auto outIndices_view = outIndices.narrow(1, 0 + i * 2048, 2048);
+
+    //printf("outview: %d %d\n", outDistances_view.sizes()[0], outDistances_view.sizes()[1]);
+
+    runPass2SelectLists(flatHeapDistances,
+                        flatHeapIndices,
+                        listIndices,
+                        indicesOptions,
+                        prefixSumOffsets,
+                        listIds,
+                        2048,
+                        metricToSortDirection(metricType),
+                        outDistances_view,
+                        outIndices_view,
+                        stream);
+
+
+    float *distances = new float[topk];
+    fromDevice<float, 2>(outDistances_view, distances, stream);
+
+    //for (size_t j = 0; j < topk; j += 1024) {
+    //    printf("distances[%u]: %f\n", j, distances[j]);
+    //}
+
+    min_dist = distances[2048 - 1];
+    printf("topk dist: %f\n", min_dist);
+    delete [] distances;
+
+
+    if (metricToSortDirection(metricType)) {
+        printf("choose largest\n");
+    } else {
+        printf("choose smallest\n");
+    }
+  }
 }
 
 void
@@ -403,6 +457,7 @@ runIVFFlatScan(Tensor<float, 2, true>& queries,
   // This is the size of the first-level heap passes
   constexpr int kNProbeSplit = 8;
   int pass2Chunks = std::min(nprobe, kNProbeSplit);
+  printf("pass2Chunks: %d\n", pass2Chunks);
 
   size_t sizeForFirstSelectPass =
     pass2Chunks * k * (sizeof(float) + sizeof(int));

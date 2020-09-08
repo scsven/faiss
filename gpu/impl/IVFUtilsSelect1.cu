@@ -28,7 +28,8 @@ pass1SelectLists(Tensor<int, 2, true> prefixSumOffsets,
                  int nprobe,
                  int k,
                  Tensor<float, 3, true> heapDistances,
-                 Tensor<int, 3, true> heapIndices) {
+                 Tensor<int, 3, true> heapIndices,
+                 float min_dist) {
   constexpr int kNumWarps = ThreadsPerBlock / kWarpSize;
 
   __shared__ float smemK[kNumWarps * NumWarpQ];
@@ -62,12 +63,16 @@ pass1SelectLists(Tensor<int, 2, true> prefixSumOffsets,
   // BlockSelect add cannot be used in a warp divergent circumstance; we
   // handle the remainder warp below
   for (; i < limit; i += blockDim.x) {
-    heap.add(distanceStart[i], start + i);
+      if (distanceStart[i] > min_dist) {
+        heap.addThreadQ(distanceStart[i], start + i);
+      }
+      heap.checkThreadQ();
   }
 
   // Handle warp divergence separately
   if (i < num) {
-    heap.addThreadQ(distanceStart[i], start + i);
+      if (distanceStart[i] > min_dist)
+        heap.addThreadQ(distanceStart[i], start + i);
   }
 
   // Merge all final results
@@ -103,7 +108,94 @@ runPass1SelectLists(Tensor<int, 2, true>& prefixSumOffsets,
                                    nprobe,                              \
                                    k,                                   \
                                    heapDistances,                       \
-                                   heapIndices);                        \
+                                   heapIndices,                         \
+                                   0.0);                                \
+    CUDA_TEST_ERROR();                                                  \
+    return; /* success */                                               \
+  } while (0)
+
+#if GPU_MAX_SELECTION_K >= 2048
+
+  // block size 128 for k <= 1024, 64 for k = 2048
+#define RUN_PASS_DIR(DIR)                                 \
+  do {                                                    \
+    if (k == 1) {                                         \
+      RUN_PASS(128, 1, 1, DIR);                           \
+    } else if (k <= 32) {                                 \
+      RUN_PASS(128, 32, 2, DIR);                          \
+    } else if (k <= 64) {                                 \
+      RUN_PASS(128, 64, 3, DIR);                          \
+    } else if (k <= 128) {                                \
+      RUN_PASS(128, 128, 3, DIR);                         \
+    } else if (k <= 256) {                                \
+      RUN_PASS(128, 256, 4, DIR);                         \
+    } else if (k <= 512) {                                \
+      RUN_PASS(128, 512, 8, DIR);                         \
+    } else if (k <= 1024) {                               \
+      RUN_PASS(128, 1024, 8, DIR);                        \
+    } else if (k <= 2048) {                               \
+      RUN_PASS(64, 2048, 8, DIR);                         \
+    }                                                     \
+  } while (0)
+
+#else
+
+#define RUN_PASS_DIR(DIR)                                 \
+  do {                                                    \
+    if (k == 1) {                                         \
+      RUN_PASS(128, 1, 1, DIR);                           \
+    } else if (k <= 32) {                                 \
+      RUN_PASS(128, 32, 2, DIR);                          \
+    } else if (k <= 64) {                                 \
+      RUN_PASS(128, 64, 3, DIR);                          \
+    } else if (k <= 128) {                                \
+      RUN_PASS(128, 128, 3, DIR);                         \
+    } else if (k <= 256) {                                \
+      RUN_PASS(128, 256, 4, DIR);                         \
+    } else if (k <= 512) {                                \
+      RUN_PASS(128, 512, 8, DIR);                         \
+    } else if (k <= 1024) {                               \
+      RUN_PASS(128, 1024, 8, DIR);                        \
+    }                                                     \
+  } while (0)
+
+#endif // GPU_MAX_SELECTION_K
+
+  if (chooseLargest) {
+    RUN_PASS_DIR(true);
+  } else {
+    RUN_PASS_DIR(false);
+  }
+
+#undef RUN_PASS_DIR
+#undef RUN_PASS
+}
+
+void
+runPass1SelectLists(Tensor<int, 2, true>& prefixSumOffsets,
+                    Tensor<float, 1, true>& distance,
+                    int nprobe,
+                    int k,
+                    bool chooseLargest,
+                    Tensor<float, 3, true>& heapDistances,
+                    Tensor<int, 3, true>& heapIndices,
+                    float min_dist,
+                    cudaStream_t stream) {
+  // This is caught at a higher level
+  FAISS_ASSERT(k <= GPU_MAX_SELECTION_K);
+
+  auto grid = dim3(heapDistances.getSize(1), prefixSumOffsets.getSize(0));
+
+#define RUN_PASS(BLOCK, NUM_WARP_Q, NUM_THREAD_Q, DIR)                  \
+  do {                                                                  \
+    pass1SelectLists<BLOCK, NUM_WARP_Q, NUM_THREAD_Q, DIR>              \
+      <<<grid, BLOCK, 0, stream>>>(prefixSumOffsets,                    \
+                                   distance,                            \
+                                   nprobe,                              \
+                                   k,                                   \
+                                   heapDistances,                       \
+                                   heapIndices,                         \
+                                   min_dist);                           \
     CUDA_TEST_ERROR();                                                  \
     return; /* success */                                               \
   } while (0)

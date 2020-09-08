@@ -44,6 +44,9 @@ libfaiss.$(SHAREDEXT): $(OBJ)
 %.o: %.cu
 	$(NVCC) $(NVCCFLAGS) -g -O3 -c $< -o $@
 
+clean_gpu:
+	rm -f $(GPU_OBJ)
+
 clean:
 	rm -f libfaiss.a libfaiss.$(SHAREDEXT)
 	rm -f $(OBJ)
@@ -70,9 +73,11 @@ uninstall:
 
 -include depend
 
+#$(CXXCPP) $(CPPFLAGS) -DCUDA_VERSION=7050 -x c++ -MM $$i; \
+
 depend: $(SRC) $(GPU_SRC)
 	for i in $^; do \
-		$(CXXCPP) $(CPPFLAGS) -DCUDA_VERSION=7050 -x c++ -MM $$i; \
+		$(CXXCPP) $(CPPFLAGS) -x c++ -MM $$i; \
 	done > depend
 
 

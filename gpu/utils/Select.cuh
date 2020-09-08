@@ -165,6 +165,8 @@ struct BlockSelect {
     }
 
     // We have to beat at least this element
+
+    // wxyu: why ?
     warpKTop = warpK[kMinus1];
 
     warpFence();
