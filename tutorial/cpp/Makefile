@@ -5,7 +5,7 @@
 
 -include ../../makefile.inc
 
-GPU_TARGETS = 6-CPU-GPU-Comp
+GPU_TARGETS = test.bin
 
 default: gpu
 
@@ -19,6 +19,6 @@ gpu: $(GPU_TARGETS)
 
 clean:
 	rm -f $(CPU_TARGETS) $(GPU_TARGETS)
-	rm cpu-index gpu-index query base
+	rm *.data
 
 .PHONY: all default gpu clean

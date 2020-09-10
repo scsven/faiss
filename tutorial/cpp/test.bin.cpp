@@ -261,7 +261,7 @@ int main() {
     
     std::vector<float> queries;
     {
-        auto query_file = "./query";
+        auto query_file = "query.data";
         if (file_exist(query_file)) {
             load_vector(queries, query_file);
         } else {
@@ -273,7 +273,7 @@ int main() {
 
     std::vector<float> base;
     {
-        auto base_file = "./base";
+        auto base_file = "base.data";
         if (file_exist(base_file)) {
             load_vector(base, base_file);
         } else {
@@ -283,8 +283,8 @@ int main() {
     }
 
 
-    test<GPUTestIndex>("./gpu-index", "./gpu-result", res, base, queries, 4096);
-    test<CPUTestIndex>("./cpu-index", "./cpu-result", res, base, queries, 8192);
+    test<GPUTestIndex>("gpu-index.data", "gpu-result.data", res, base, queries, 4096);
+    test<CPUTestIndex>("cpu-index.data", "cpu-result.data", res, base, queries, 8192);
 
     return 0;
 }
