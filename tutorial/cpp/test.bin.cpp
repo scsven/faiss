@@ -283,7 +283,7 @@ int main() {
     }
 
 
-    test<GPUTestIndex>("gpu-index.data", "gpu-result.data", res, base, queries, 4096);
+    test<GPUTestIndex>("gpu-index.data", "gpu-result.data", res, base, queries, 8192);
     test<CPUTestIndex>("cpu-index.data", "cpu-result.data", res, base, queries, 8192);
 
     return 0;
