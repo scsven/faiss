@@ -383,12 +383,15 @@ runIVFFlatScanTile(Tensor<float, 2, true>& queries,
     const int64_t max_slice_size = 2048;
     int64_t slice_size = 2048;
     float minDist = 0.0;
-    for (size_t i = 0; i < k; i += slice_size) {
-        printf("i: %llu, slice_size: %lld\n", i, slice_size);
-        auto heapDistancesView = heapDistances.narrow(2, i, slice_size);
-        auto heapIndicesView = heapIndices.narrow(2, i, slice_size);
-        auto outDistancesView = outDistances.narrow(1, i, slice_size);
-        auto outIndicesView = outIndices.narrow(1, i, slice_size);
+    for (size_t slice_start = 0; slice_start < k; slice_start += max_slice_size) {
+        if (slice_start + max_slice_size <= k) slice_size = max_slice_size;
+        else slice_size = k - slice_start;
+
+        printf("k:%d, i: %llu, slice_size: %lld\n", k, slice_start, slice_size);
+        auto heapDistancesView = heapDistances.narrow(2, slice_start, slice_size);
+        auto heapIndicesView = heapIndices.narrow(2, slice_start, slice_size);
+        auto outDistancesView = outDistances.narrow(1, slice_start, slice_size);
+        auto outIndicesView = outIndices.narrow(1, slice_start, slice_size);
         runIVFFlatScanTileSlice(
             listIds,
             listIndices,
@@ -408,8 +411,6 @@ runIVFFlatScanTile(Tensor<float, 2, true>& queries,
         auto minOutDistancesView = outDistancesView.narrow(1, slice_size - 1, 1);
         fromDevice<float, 2>(minOutDistancesView, &minDist, stream);
         printf("topk dist: %f\n", minDist);
-
-        slice_size = (k - i >= max_slice_size ? max_slice_size : k - i);
     }
   } else {
     runIVFFlatScanTileSlice(

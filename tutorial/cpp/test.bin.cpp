@@ -219,7 +219,7 @@ class GPUTestIndex : public TestIndex {
 
 
 
-const int64_t nb = 10000;
+const int64_t nb = 1000000;
 const int64_t nq = 1;
 const int64_t d = 32;
 const int64_t nlist = 1;
@@ -227,7 +227,12 @@ const int64_t nlist = 1;
 
 template<typename T>
 void
-test(const std::string& index_file, const std::string& result_file, faiss::gpu::StandardGpuResources &res, std::vector<float>& base, std::vector<float>& queries, int64_t topk) {
+test(const std::string& index_file, 
+        const std::string& result_file, 
+        faiss::gpu::StandardGpuResources &res, 
+        std::vector<float>& base, 
+        std::vector<float>& queries, 
+        int64_t topk) {
     TestIndex *gpu = new T(res, d, nlist);
 
     if (file_exist(index_file)) {
@@ -283,8 +288,8 @@ int main() {
     }
 
 
-    test<GPUTestIndex>("gpu-index.data", "gpu-result.data", res, base, queries, 8192);
-    test<CPUTestIndex>("cpu-index.data", "cpu-result.data", res, base, queries, 8192);
+    test<GPUTestIndex>("gpu-index.data", "gpu-result.data", res, base, queries, 10000);
+    test<CPUTestIndex>("cpu-index.data", "cpu-result.data", res, base, queries, 10000);
 
     return 0;
 }

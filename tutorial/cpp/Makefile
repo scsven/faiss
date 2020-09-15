@@ -5,20 +5,14 @@
 
 -include ../../makefile.inc
 
-GPU_TARGETS = test.bin
+all: test.bin
+	./test.bin
 
-default: gpu
-
-all: gpu
-
-gpu: $(GPU_TARGETS)
-	./$^
-
-%: %.cpp ../../libfaiss.a
+test.bin: test.bin.cpp ../../libfaiss.a
 	$(CXX) $(CXXFLAGS) $(CPPFLAGS) -o $@ $^ $(LDFLAGS) -I../../.. $(LIBS)
 
 clean:
-	rm -f $(CPU_TARGETS) $(GPU_TARGETS)
+	rm -f test.bin
 	rm *.data
 
-.PHONY: all default gpu clean
+.PHONY: all clean
