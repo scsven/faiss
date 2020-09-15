@@ -193,7 +193,9 @@ runIVFFlatScanTileSlice(
                    Tensor<float, 2, true>& outDistances,
                    Tensor<long, 2, true>& outIndices,
                    /* CUDA stream */
-                   cudaStream_t stream) {
+                   cudaStream_t stream,
+                    GpuResources* res
+                   ) {
     // k-select the output in chunks, to increase parallelism
     runPass1SelectLists(prefixSumOffsets,
                         allDistances,
@@ -205,9 +207,37 @@ runIVFFlatScanTileSlice(
                         minDist,
                         stream);
 
+
+    float *first = (float*)malloc(sizeof(float) * k * 2);
+    auto view = heapDistances.narrow(1, 0, 1).narrow(2, 0, k);
+    fromDevice<float, 3>(view, first, stream);
+    view = heapDistances.narrow(1, 1, 1).narrow(2, 0, k);
+    fromDevice<float, 3>(view, &first[k], stream);
+    for (auto i = 0; i < 2; ++i)
+        printf("distance: %f", first[i]);
+
+    printf("heapDistances.shape %d, %d, %d\n", heapDistances.getSize(0), heapDistances.getSize(1), heapDistances.getSize(2));
+
     // k-select final output
-    auto flatHeapDistances = heapDistances.downcastInner<2>();
-    auto flatHeapIndices = heapIndices.downcastInner<2>();
+    //auto flatHeapDistances = heapDistances.downcastInner<2>();
+    //auto flatHeapIndices = heapIndices.downcastInner<2>();
+
+  auto& mem = res->getMemoryManagerCurrentDevice();
+
+    DeviceTensor<float, 2, true> flatHeapDistances(mem, {1, 2 * k}, stream);
+    DeviceTensor<int, 2, true> flatHeapIndices(mem, {1, 2 * k}, stream);
+    fromDevice<float>(&heapDistances[0][0], &flatHeapDistances[0][0], sizeof(float)*k, stream);
+    fromDevice<float>(&heapDistances[0][1], &flatHeapDistances[0][k], sizeof(float)*k, stream);
+    fromDevice<int>(&heapIndices[0][0], &flatHeapIndices[0][0], sizeof(int)*k, stream);
+    fromDevice<int>(&heapIndices[0][1], &flatHeapIndices[0][k], sizeof(int)*k, stream);
+
+
+    printf("flatHeapDistances.shape %d, %d\n", flatHeapDistances.getSize(0), flatHeapDistances.getSize(1));
+
+    float *flat = (float*)malloc(sizeof(float) * k * 2);
+    fromDevice<float, 2>(flatHeapDistances, flat, stream);
+    for (auto i = 0; i < 2; ++ i)
+        printf("flat: %f ", flat[i]);
 
     runPass2SelectLists(flatHeapDistances,
                         flatHeapIndices,
@@ -220,6 +250,11 @@ runIVFFlatScanTileSlice(
                         outDistances,
                         outIndices,
                         stream);
+
+    float *out = (float*)malloc(sizeof(float) * k);
+    fromDevice<float, 2>(outDistances, out, stream);
+    for (auto i = 0; i < k; ++i) 
+        printf("out: %f ", out[i]);
 }
 
 void
@@ -241,7 +276,8 @@ runIVFFlatScanTile(Tensor<float, 2, true>& queries,
                    GpuScalarQuantizer* scalarQ,
                    Tensor<float, 2, true>& outDistances,
                    Tensor<long, 2, true>& outIndices,
-                   cudaStream_t stream) {
+                   cudaStream_t stream,
+                   GpuResources* res) {
   int dim = queries.getSize(1);
 
   // Check the amount of shared memory per block available based on our type is
@@ -405,12 +441,14 @@ runIVFFlatScanTile(Tensor<float, 2, true>& queries,
             minDist,
             outDistancesView,
             outIndicesView,
-            stream
+            stream,
+            res
             );
 
         auto minOutDistancesView = outDistancesView.narrow(1, slice_size - 1, 1);
         fromDevice<float, 2>(minOutDistancesView, &minDist, stream);
         printf("topk dist: %f\n", minDist);
+        break;
     }
   } else {
     runIVFFlatScanTileSlice(
@@ -426,7 +464,8 @@ runIVFFlatScanTile(Tensor<float, 2, true>& queries,
             0.0,
             outDistances,
             outIndices,
-            stream
+            stream,
+            res
             );
   }
 
@@ -678,7 +717,9 @@ runIVFFlatScan(Tensor<float, 2, true>& queries,
                        scalarQ,
                        outDistanceView,
                        outIndicesView,
-                       streams[curStream]);
+                       streams[curStream],
+                       res
+                       );
 
     curStream = (curStream + 1) % 2;
   }

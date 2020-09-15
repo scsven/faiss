@@ -72,6 +72,7 @@ pass2SelectLists(Tensor<float, 2, true> heapDistances,
             NumWarpQ, NumThreadQ, ThreadsPerBlock>
     heap(kInit, -1, smemK, smemV, k);
 
+
   auto queryId = blockIdx.x;
   int num = heapDistances.getSize(1);
   int limit = utils::roundDown(num, kWarpSize);
@@ -81,6 +82,7 @@ pass2SelectLists(Tensor<float, 2, true> heapDistances,
 
   // BlockSelect add cannot be used in a warp divergent circumstance; we
   // handle the remainder warp below
+
   for (; i < limit; i += blockDim.x) {
     heap.add(heapDistanceStart[i], i);
   }

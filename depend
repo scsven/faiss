@@ -61,15 +61,15 @@ IndexIVFPQ.o: IndexIVFPQ.cpp faiss/IndexIVFPQ.h faiss/IndexIVF.h \
  faiss/impl/FaissException.h faiss/impl/AuxIndexStructures.h
 MatrixStats.o: MatrixStats.cpp faiss/MatrixStats.h faiss/utils/utils.h \
  faiss/utils/Heap.h
-IndexReplicas.o: IndexReplicas.cpp faiss/IndexReplicas.h faiss/Index.h \
- faiss/MetricType.h faiss/IndexBinary.h faiss/impl/FaissAssert.h \
- faiss/impl/FaissException.h faiss/impl/ThreadedIndex.h \
- faiss/utils/WorkerThread.h faiss/impl/ThreadedIndex-inl.h
 IndexLattice.o: IndexLattice.cpp faiss/IndexLattice.h faiss/IndexIVF.h \
  faiss/Index.h faiss/MetricType.h faiss/InvertedLists.h faiss/DirectMap.h \
  faiss/Clustering.h faiss/utils/Heap.h faiss/impl/lattice_Zn.h \
  faiss/utils/hamming.h faiss/utils/hamming-inl.h faiss/impl/FaissAssert.h \
  faiss/impl/FaissException.h faiss/utils/distances.h
+IndexReplicas.o: IndexReplicas.cpp faiss/IndexReplicas.h faiss/Index.h \
+ faiss/MetricType.h faiss/IndexBinary.h faiss/impl/FaissAssert.h \
+ faiss/impl/FaissException.h faiss/impl/ThreadedIndex.h \
+ faiss/utils/WorkerThread.h faiss/impl/ThreadedIndex-inl.h
 index_factory.o: index_factory.cpp faiss/AutoTune.h faiss/Index.h \
  faiss/MetricType.h faiss/IndexBinary.h faiss/impl/FaissAssert.h \
  faiss/impl/FaissException.h faiss/utils/utils.h faiss/utils/Heap.h \

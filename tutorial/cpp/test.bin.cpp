@@ -27,6 +27,7 @@
 using namespace faiss;
 
 bool file_exist(const std::string& path) {
+    return false;
     std::ifstream f(path.c_str());
     return f.good();
 }
@@ -219,10 +220,10 @@ class GPUTestIndex : public TestIndex {
 
 
 
-const int64_t nb = 1000000;
+const int64_t nb = 100;
 const int64_t nq = 1;
 const int64_t d = 32;
-const int64_t nlist = 1;
+const int64_t nlist = 2;
 
 
 template<typename T>
