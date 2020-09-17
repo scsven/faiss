@@ -6,11 +6,12 @@
  */
 
 
-#include <faiss/gpu/impl/IVFFlatScan.cuh>
+#include <faiss/gpu/impl/IVFFlatScanLargeK.cuh>
 #include <faiss/gpu/impl/DistanceUtils.cuh>
 #include <faiss/gpu/impl/IVFUtils.cuh>
 #include <faiss/gpu/GpuResources.h>
 #include <faiss/gpu/utils/ConversionOperators.cuh>
+#include <faiss/gpu/utils/CopyUtils.cuh>
 #include <faiss/gpu/utils/DeviceDefs.cuh>
 #include <faiss/gpu/utils/DeviceUtils.h>
 #include <faiss/gpu/utils/DeviceTensor.cuh>
@@ -175,6 +176,87 @@ ivfFlatScan(Tensor<float, 2, true> queries,
                                    distanceOut);
 }
 
+void 
+runIVFFlatScanTileSlice(
+                   /* input */
+                   Tensor<int, 2, true>& listIds,
+                   thrust::device_vector<void*>& listIndices,
+                   IndicesOptions indicesOptions,
+                   Tensor<int, 2, true>& prefixSumOffsets,
+                   Tensor<float, 1, true>& allDistances,
+                   Tensor<float, 3, true>& heapDistances,
+                   Tensor<int, 3, true>& heapIndices,
+                   int k,
+                   faiss::MetricType metricType,
+                   float minDist,
+                   /* output */
+                   Tensor<float, 2, true>& outDistances,
+                   Tensor<long, 2, true>& outIndices,
+                   /* CUDA stream */
+                   cudaStream_t stream,
+                    GpuResources* res
+                   ) {
+
+    cudaMemset(heapDistances.data(), 0, heapDistances.numElements() * sizeof(float));
+    cudaMemset(heapIndices.data(), 0, heapIndices.numElements() * sizeof(int));
+  //auto& mem = res->getMemoryManagerCurrentDevice();
+//    printf("heapDistances.shape: %d, %d, %d\n", heapDistances.getSize(0), heapDistances.getSize(1), heapDistances.getSize(2));
+//    printf("heapIndices.shape: %d, %d, %d\n", heapIndices.getSize(0), heapIndices.getSize(1), heapIndices.getSize(2));
+
+    // k-select the output in chunks, to increase parallelism
+    runPass1SelectLists(prefixSumOffsets,
+                        allDistances,
+                        listIds.getSize(1),
+                        k,
+                        metricToSortDirection(metricType),
+                        heapDistances,
+                        heapIndices,
+                        minDist,
+                        stream);
+
+//    float *heap = (float*)malloc(sizeof(float) * 2 * k);
+//    fromDevice<float, 3>(heapDistances, heap, stream);
+//    int *heapindice = (int*)malloc(sizeof(int) * 2 * k);
+//    fromDevice<int, 3>(heapIndices, heapindice, stream);
+//    for (auto i = 0; i < 0 * k; ++i) 
+//        printf("[%d %f]\t\t", heapindice[i], heap[i]);
+
+    // k-select final output
+    //DeviceTensor<float, 2, true> flatHeapDistances(mem, {1, 2 * k}, stream);
+    //DeviceTensor<int, 2, true> flatHeapIndices(mem, {1, 2 * k}, stream);
+    //fromDevice<float>(&heapDistances[0][0], &flatHeapDistances[0][0], sizeof(float)*k, stream);
+    //fromDevice<float>(&heapDistances[0][1], &flatHeapDistances[0][k], sizeof(float)*k, stream);
+    //fromDevice<int>(&heapIndices[0][0], &flatHeapIndices[0][0], sizeof(int)*k, stream);
+    //fromDevice<int>(&heapIndices[0][1], &flatHeapIndices[0][k], sizeof(int)*k, stream);
+
+    auto flatHeapDistances = heapDistances.downcastInner<2>();
+    auto flatHeapIndices = heapIndices.downcastInner<2>();
+
+//    printf("flatHeapDistances.shape: %d, %d\n", flatHeapDistances.getSize(0), flatHeapDistances.getSize(1));
+
+//    if (flatHeapDistances.isContiguous()) printf("flatHeapDistances is contiguous\n");
+
+//    float *flat = (float*)malloc(sizeof(float) * 1 * k);
+//    fromDevice<float, 2>(flatHeapDistances, flat, stream);
+//    int *flatindice = (int*)malloc(sizeof(int) * 1 * k);
+//    fromDevice<int, 2>(flatHeapIndices, flatindice, stream);
+//    for (auto i = 0; i < 0 * k; ++i) 
+//        printf("{%d %f}\t\t", flatindice[i], flat[i]);
+
+
+    runPass2SelectLists(flatHeapDistances,
+                        flatHeapIndices,
+                        listIndices,
+                        indicesOptions,
+                        prefixSumOffsets,
+                        listIds,
+                        k,
+                        metricToSortDirection(metricType),
+                        outDistances,
+                        outIndices,
+                        stream);
+}
+
 void
 runIVFFlatScanTile(Tensor<float, 2, true>& queries,
                    Tensor<int, 2, true>& listIds,
@@ -187,6 +269,8 @@ runIVFFlatScanTile(Tensor<float, 2, true>& queries,
                    Tensor<float, 1, true>& allDistances,
                    Tensor<float, 3, true>& heapDistances,
                    Tensor<int, 3, true>& heapIndices,
+                   Tensor<float, 3, true>& lastHeapDistances,
+                   Tensor<int, 3, true>& lastHeapIndices,
                    int k,
                    faiss::MetricType metricType,
                    bool useResidual,
@@ -194,7 +278,8 @@ runIVFFlatScanTile(Tensor<float, 2, true>& queries,
                    GpuScalarQuantizer* scalarQ,
                    Tensor<float, 2, true>& outDistances,
                    Tensor<long, 2, true>& outIndices,
-                   cudaStream_t stream) {
+                   cudaStream_t stream,
+                   GpuResources* res) {
   int dim = queries.getSize(1);
 
   // Check the amount of shared memory per block available based on our type is
@@ -332,51 +417,167 @@ runIVFFlatScanTile(Tensor<float, 2, true>& queries,
 #undef HANDLE_METRICS
 #undef RUN_IVF_FLAT
 
-  // k-select the output in chunks, to increase parallelism
-  runPass1SelectLists(prefixSumOffsets,
-                      allDistances,
-                      listIds.getSize(1),
-                      k,
-                      metricToSortDirection(metricType),
-                      heapDistances,
-                      heapIndices,
-                      stream);
+  GPU_FAISS_ASSERT_MSG(k > 2048, "must be K > 2048");
 
-  // k-select final output
-  auto flatHeapDistances = heapDistances.downcastInner<2>();
-  auto flatHeapIndices = heapIndices.downcastInner<2>();
+  const int64_t max_slice_size = 2048;
+  int64_t slice_size = 2048;
+  float minDist = 0.0;
+  for (int64_t slice_start = 0; slice_start < k; slice_start += slice_size) {
+      if (slice_start + max_slice_size <= k) slice_size = max_slice_size;
+      else slice_size = k - slice_start;
 
-  runPass2SelectLists(flatHeapDistances,
-                      flatHeapIndices,
-                      listIndices,
-                      indicesOptions,
-                      prefixSumOffsets,
-                      listIds,
-                      k,
-                      metricToSortDirection(metricType),
-                      outDistances,
-                      outIndices,
-                      stream);
+      printf("k:%d, i: %ld, slice_size: %ld, minDist: %f\n", k, slice_start, slice_size, minDist);
+
+
+      auto outDistancesView = outDistances.narrow(1, slice_start, slice_size);
+      auto outIndicesView = outIndices.narrow(1, slice_start, slice_size);
+
+      if (slice_size < max_slice_size) {
+        runIVFFlatScanTileSlice(
+            listIds,
+            listIndices,
+            indicesOptions,
+            prefixSumOffsets,
+            allDistances,
+            lastHeapDistances,
+            lastHeapIndices,
+            slice_size,
+            metricType,
+            minDist,
+            outDistancesView,
+            outIndicesView,
+            stream,
+            res
+            );
+      } else {
+        runIVFFlatScanTileSlice(
+            listIds,
+            listIndices,
+            indicesOptions,
+            prefixSumOffsets,
+            allDistances,
+            heapDistances,
+            heapIndices,
+            slice_size,
+            metricType,
+            minDist,
+            outDistancesView,
+            outIndicesView,
+            stream,
+            res
+            );
+      }
+
+      
+      float maxDist;
+      auto maxOutDistancesView = outDistancesView.narrow(1, 0, 1);
+      fromDevice<float, 2>(maxOutDistancesView, &maxDist, stream);
+      printf("max dist: %f\n", maxDist);
+      
+      auto minOutDistancesView = outDistancesView.narrow(1, slice_size - 1, 1);
+      fromDevice<float, 2>(minOutDistancesView, &minDist, stream);
+      printf("topk dist: %f\n", minDist);
+  }
+
+//  // auto min_dist = 2.58573;
+//  auto min_dist = 0.0; 
+//  auto nq = outDistances.getSize(0);
+//  auto topk = outDistances.getSize(1);
+//
+//  for (size_t i = 0; i < 2; ++i) {
+//    printf("i: %d, min_dist:%f\n", i, min_dist);
+//
+//    auto heapDistance_view = heapDistances.narrow(2, 0 + i * 2048, 2048);
+//    auto heapIndices_view = heapIndices.narrow(2, 0 + i * 2048, 2048);
+//
+//    // k-select the output in chunks, to increase parallelism
+//    runPass1SelectLists(prefixSumOffsets,
+//                        allDistances,
+//                        listIds.getSize(1),
+//                        2048,
+//                        metricToSortDirection(metricType),
+//                        heapDistance_view,
+//                        heapIndices_view,
+//                        min_dist,
+//                        stream);
+//
+//    // k-select final output
+//    auto flatHeapDistances = heapDistances.downcastInner<2>();
+//    auto flatHeapIndices = heapIndices.downcastInner<2>();
+//
+//    //printf("heap: %d %d\n", flatHeapDistances.sizes()[0], flatHeapDistances.sizes()[1]);
+//    //printf("narrow: %d %d\n", 0 + i * 2048, 2048);
+//
+//    flatHeapDistances = flatHeapDistances.narrow(1, 0 + i * 2048, 2048);
+//    flatHeapIndices = flatHeapIndices.narrow(1, 0 + i * 2048, 2048);
+//
+//
+//    float *flat_distances = new float[2048];
+//    fromDevice<float, 2>(flatHeapDistances, flat_distances, stream);
+//    printf("heap: %f %f\n", flat_distances[0], flat_distances[2047]);
+//
+//
+//    //printf("heap: %d %d\n", flatHeapDistances.sizes()[0], flatHeapDistances.sizes()[1]);
+//
+//    //printf("out: %d %d\n", outDistances.sizes()[0], outDistances.sizes()[1]);
+//
+//    auto outDistances_view = outDistances.narrow(1, 0 + i * 2048, 2048);
+//    auto outIndices_view = outIndices.narrow(1, 0 + i * 2048, 2048);
+//
+//    //printf("outview: %d %d\n", outDistances_view.sizes()[0], outDistances_view.sizes()[1]);
+//
+//    runPass2SelectLists(flatHeapDistances,
+//                        flatHeapIndices,
+//                        listIndices,
+//                        indicesOptions,
+//                        prefixSumOffsets,
+//                        listIds,
+//                        2048,
+//                        metricToSortDirection(metricType),
+//                        outDistances_view,
+//                        outIndices_view,
+//                        stream);
+//
+//    float *distances = new float[topk];
+//    fromDevice<float, 2>(outDistances_view, distances, stream);
+//
+//    //for (size_t j = 0; j < topk; j += 1024) {
+//    //    printf("distances[%u]: %f\n", j, distances[j]);
+//    //}
+//
+//    min_dist = distances[2048 - 1];
+//    printf("topk dist: %f\n", min_dist);
+//    delete [] distances;
+//
+//
+//    if (metricToSortDirection(metricType)) {
+//        printf("choose largest\n");
+//    } else {
+//        printf("choose smallest\n");
+//    }
+//  }
 }
 
 void
-runIVFFlatScan(Tensor<float, 2, true>& queries,
-               Tensor<int, 2, true>& listIds,
-               thrust::device_vector<void*>& listData,
-               thrust::device_vector<void*>& listIndices,
-               IndicesOptions indicesOptions,
-               thrust::device_vector<int>& listLengths,
-               int maxListLength,
-               int k,
-               faiss::MetricType metric,
-               bool useResidual,
-               Tensor<float, 3, true>& residualBase,
-               GpuScalarQuantizer* scalarQ,
-               // output
-               Tensor<float, 2, true>& outDistances,
-               // output
-               Tensor<long, 2, true>& outIndices,
-               GpuResources* res) {
+runIVFFlatScanLargeK(Tensor<float, 2, true>& queries,
+                     Tensor<int, 2, true>& listIds,
+                     thrust::device_vector<void*>& listData,
+                     thrust::device_vector<void*>& listIndices,
+                     IndicesOptions indicesOptions,
+                     thrust::device_vector<int>& listLengths,
+                     int maxListLength,
+                     int k,
+                     faiss::MetricType metric,
+                     bool useResidual,
+                     Tensor<float, 3, true>& residualBase,
+                     GpuScalarQuantizer* scalarQ,
+                     // output
+                     Tensor<float, 2, true>& outDistances,
+                     // output
+                     Tensor<long, 2, true>& outIndices,
+                     GpuResources* res) {
+  GPU_FAISS_ASSERT_MSG(k > 2048, "must be K > 2048");
+
   constexpr int kMinQueryTileSize = 8;
   constexpr int kMaxQueryTileSize = 128;
   constexpr int kThrustMemSize = 16384;
@@ -403,6 +604,7 @@ runIVFFlatScan(Tensor<float, 2, true>& queries,
   // This is the size of the first-level heap passes
   constexpr int kNProbeSplit = 8;
   int pass2Chunks = std::min(nprobe, kNProbeSplit);
+  printf("pass2Chunks: %d\n", pass2Chunks);
 
   size_t sizeForFirstSelectPass =
     pass2Chunks * k * (sizeof(float) + sizeof(int));
@@ -462,19 +664,36 @@ runIVFFlatScan(Tensor<float, 2, true>& queries,
   DeviceTensor<float, 1, true>* allDistances[2] =
     {&allDistances1, &allDistances2};
 
+  const int slice_k = 2048;
+  const int last_k = k % 2048;
+
   DeviceTensor<float, 3, true> heapDistances1(
-    mem, {queryTileSize, pass2Chunks, k}, stream);
+    mem, {queryTileSize, pass2Chunks, slice_k}, stream);
   DeviceTensor<float, 3, true> heapDistances2(
-    mem, {queryTileSize, pass2Chunks, k}, stream);
+    mem, {queryTileSize, pass2Chunks, slice_k}, stream);
   DeviceTensor<float, 3, true>* heapDistances[2] =
     {&heapDistances1, &heapDistances2};
 
   DeviceTensor<int, 3, true> heapIndices1(
-    mem, {queryTileSize, pass2Chunks, k}, stream);
+    mem, {queryTileSize, pass2Chunks, slice_k}, stream);
   DeviceTensor<int, 3, true> heapIndices2(
-    mem, {queryTileSize, pass2Chunks, k}, stream);
+    mem, {queryTileSize, pass2Chunks, slice_k}, stream);
   DeviceTensor<int, 3, true>* heapIndices[2] =
     {&heapIndices1, &heapIndices2};
+
+  DeviceTensor<float, 3, true> lastHeapDistances1(
+    mem, {queryTileSize, pass2Chunks, last_k}, stream);
+  DeviceTensor<float, 3, true> lastHeapDistances2(
+    mem, {queryTileSize, pass2Chunks, last_k}, stream);
+  DeviceTensor<float, 3, true>* lastHeapDistances[2] =
+    {&lastHeapDistances1, &lastHeapDistances2};
+
+  DeviceTensor<int, 3, true> lastHeapIndices1(
+    mem, {queryTileSize, pass2Chunks, last_k}, stream);
+  DeviceTensor<int, 3, true> lastHeapIndices2(
+    mem, {queryTileSize, pass2Chunks, last_k}, stream);
+  DeviceTensor<int, 3, true>* lastHeapIndices[2] =
+    {&lastHeapIndices1, &lastHeapIndices2};
 
   auto streams = res->getAlternateStreamsCurrentDevice();
   streamWait(streams, {stream});
@@ -500,6 +719,11 @@ runIVFFlatScan(Tensor<float, 2, true>& queries,
     auto heapIndicesView =
       heapIndices[curStream]->narrowOutermost(0, numQueriesInTile);
 
+    auto lastHeapDistancesView =
+      lastHeapDistances[curStream]->narrowOutermost(0, numQueriesInTile);
+    auto lastHeapIndicesView =
+      lastHeapIndices[curStream]->narrowOutermost(0, numQueriesInTile);
+
     auto outDistanceView =
       outDistances.narrowOutermost(query, numQueriesInTile);
     auto outIndicesView =
@@ -516,6 +740,8 @@ runIVFFlatScan(Tensor<float, 2, true>& queries,
                        *allDistances[curStream],
                        heapDistancesView,
                        heapIndicesView,
+                       lastHeapDistancesView,
+                       lastHeapIndicesView,
                        k,
                        metric,
                        useResidual,
@@ -523,7 +749,9 @@ runIVFFlatScan(Tensor<float, 2, true>& queries,
                        scalarQ,
                        outDistanceView,
                        outIndicesView,
-                       streams[curStream]);
+                       streams[curStream],
+                       res
+                       );
 
     curStream = (curStream + 1) % 2;
   }

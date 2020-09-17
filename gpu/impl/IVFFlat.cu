@@ -11,6 +11,7 @@
 #include <faiss/gpu/impl/FlatIndex.cuh>
 #include <faiss/gpu/impl/IVFAppend.cuh>
 #include <faiss/gpu/impl/IVFFlatScan.cuh>
+#include <faiss/gpu/impl/IVFFlatScanLargeK.cuh>
 #include <faiss/gpu/impl/RemapIndices.h>
 #include <faiss/gpu/utils/ConversionOperators.cuh>
 #include <faiss/gpu/utils/CopyUtils.cuh>
@@ -313,23 +314,41 @@ IVFFlat::query(Tensor<float, 2, true>& queries,
     quantizer_->reconstruct(coarseIndices, residualBase);
   }
 
-  runIVFFlatScan(queries,
-                 coarseIndices,
-                 deviceListDataPointers_,
-                 deviceListIndexPointers_,
-                 indicesOptions_,
-                 deviceListLengths_,
-                 maxListLength_,
-                 k,
-                 metric_,
-                 useResidual_,
-                 residualBase,
-                 scalarQ_.get(),
-                 outDistances,
-                 outIndices,
-                 resources_);
+  if (k > 2048) {
+    runIVFFlatScanLargeK(queries,
+                         coarseIndices,
+                         deviceListDataPointers_,
+                         deviceListIndexPointers_,
+                         indicesOptions_,
+                         deviceListLengths_,
+                         maxListLength_,
+                         k,
+                         metric_,
+                         useResidual_,
+                         residualBase,
+                         scalarQ_.get(),
+                         outDistances,
+                         outIndices,
+                         resources_);
+  } else {
+    runIVFFlatScan(queries,
+                   coarseIndices,
+                   deviceListDataPointers_,
+                   deviceListIndexPointers_,
+                   indicesOptions_,
+                   deviceListLengths_,
+                   maxListLength_,
+                   k,
+                   metric_,
+                   useResidual_,
+                   residualBase,
+                   scalarQ_.get(),
+                   outDistances,
+                   outIndices,
+                   resources_);
+  }
 
-  // If the GPU isn't storing indices (they are on the CPU side), we
+    // If the GPU isn't storing indices (they are on the CPU side), we
   // need to perform the re-mapping here
   // FIXME: we might ultimately be calling this function with inputs
   // from the CPU, these are unnecessary copies

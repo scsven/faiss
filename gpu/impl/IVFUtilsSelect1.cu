@@ -81,6 +81,7 @@ pass1SelectLists(Tensor<int, 2, true> prefixSumOffsets,
   // Write out the final k-selected values; they should be all
   // together
   for (int i = threadIdx.x; i < k; i += blockDim.x) {
+    //printf("smem: %f\t", smemK[i]);
     heapDistances[queryId][sliceId][i] = smemK[i];
     heapIndices[queryId][sliceId][i] = smemV[i];
   }

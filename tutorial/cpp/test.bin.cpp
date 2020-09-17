@@ -220,10 +220,10 @@ class GPUTestIndex : public TestIndex {
 
 
 
-const int64_t nb = 100;
+const int64_t nb = 1000000;
 const int64_t nq = 1;
 const int64_t d = 32;
-const int64_t nlist = 2;
+const int64_t nlist = 256;
 
 
 template<typename T>
@@ -288,9 +288,10 @@ int main() {
         }
     }
 
+    auto kkkkkk = 10000;
 
-    test<GPUTestIndex>("gpu-index.data", "gpu-result.data", res, base, queries, 10000);
-    test<CPUTestIndex>("cpu-index.data", "cpu-result.data", res, base, queries, 10000);
+    test<GPUTestIndex>("gpu-index.data", "gpu-result.data", res, base, queries, kkkkkk);
+    test<CPUTestIndex>("cpu-index.data", "cpu-result.data", res, base, queries, kkkkkk);
 
     return 0;
 }
