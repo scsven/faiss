@@ -9,6 +9,7 @@
 #include <cstdlib>
 #include <ctime>
 #include <cassert>
+#include <iomanip>
 
 #include <iostream>
 #include <fstream>
@@ -72,21 +73,22 @@ save_vector(std::vector<float>& vec, const std::string& path) {
 }
 
 void
-save_result(std::pair<std::vector<float>, std::vector<long>> result, int64_t topk, const std::string& path) {
-    std::cout << "save result to " << path << std::endl;
-    std::ofstream out(path.c_str(), std::ios::out);
-
+save_result(std::pair<std::vector<float>, std::vector<long>> result, int64_t topk, const std::string& bpath) {
     auto dists = std::get<0>(result);
     auto ids = std::get<1>(result);
     assert(ids.size() % topk == 0);
     auto nq = ids.size() / topk;
     for (size_t i = 0; i < nq; ++i) {
+        auto path = bpath + "_" + std::to_string(i);
+        std::cout << "save result to " << path << std::endl;
+        std::ofstream out(path.c_str(), std::ios::out);
+        out << std::fixed;
         for (size_t j = 0; j < topk; ++j) {
-            out << ids[i * topk + j] << "\t" << dists[i * topk + j] << std::endl; 
+            out << ids[i * topk + j] << "\t" << std::setprecision(5) << dists[i * topk + j] << std::endl; 
         } 
         out << "==================" << std::endl; 
+        out.close();
     }
-    out.close();
 }
 
 class TestIndex {
@@ -220,10 +222,10 @@ class GPUTestIndex : public TestIndex {
 
 
 
-const int64_t nb = 30000;
-const int64_t nq = 2;
+const int64_t nb = 100000;
+const int64_t nq = 1000;
 const int64_t d = 32;
-const int64_t nlist = 2;
+const int64_t nlist = 300;
 
 
 template<typename T>

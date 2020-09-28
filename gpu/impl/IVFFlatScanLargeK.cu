@@ -243,23 +243,23 @@ runIVFFlatScanTileSlice(
     auto flatHeapDistances = heapDistances.downcastInner<2>();
     auto flatHeapIndices = heapIndices.downcastInner<2>();
 
-    printf("flatHeapDistances.shape: %d, %d\n", flatHeapDistances.getSize(0), flatHeapDistances.getSize(1));
+//    printf("flatHeapDistances.shape: %d, %d\n", flatHeapDistances.getSize(0), flatHeapDistances.getSize(1));
 
 //    if (flatHeapDistances.isContiguous()) printf("flatHeapDistances is contiguous\n");
 
-    auto nq = heapDistances.getSize(0);
-    auto np2 = heapDistances.getSize(1);
+//    auto nq = heapDistances.getSize(0);
+//    auto np2 = heapDistances.getSize(1);
+//
+//    float *flat = (float*)malloc(sizeof(float) * nq * np2 * k);
+//    fromDevice<float, 2>(flatHeapDistances, flat, stream);
+//    int *flatindice = (int*)malloc(sizeof(int) * nq * np2 * k);
+//    fromDevice<int, 2>(flatHeapIndices, flatindice, stream);
 
-    float *flat = (float*)malloc(sizeof(float) * nq * np2 * k);
-    fromDevice<float, 2>(flatHeapDistances, flat, stream);
-    int *flatindice = (int*)malloc(sizeof(int) * nq * np2 * k);
-    fromDevice<int, 2>(flatHeapIndices, flatindice, stream);
-
-    for (auto i = 0; i < 0 * np2 * k; ++i)  {
-        auto index = 1 * np2 * k + i;
-        printf("{%d %f}\t\t", flatindice[index], flat[index]);
-    }
-    printf("\n");
+//    for (auto i = 0; i < 0 * np2 * k; ++i)  {
+//        auto index = 1 * np2 * k + i;
+//        printf("{%d %f}\t\t", flatindice[index], flat[index]);
+//    }
+//    printf("\n");
 
 
     runPass2SelectLists(flatHeapDistances,
@@ -294,14 +294,14 @@ runIVFFlatScanTileSlice(
 //    printf("\n");
 
     // Copy the kth distance into minDistances
-    //auto nq = outDistances.getSize(0);
+    auto nq = outDistances.getSize(0);
     copyMinDistancePerQuery<<<1, nq, 0, stream>>>(minDistances, outDistances, k);
 
-    auto min = (float*)malloc(sizeof(float) * nq);
-auto tmp = minDistances.downcastInner<1>();
-    fromDevice<float, 1>(tmp, min, stream);
-    for (auto i = 0; i < nq; ++i)
-        printf("minDistances[%d]: %f\n", i, min[i]);
+//    auto min = (float*)malloc(sizeof(float) * nq);
+//auto tmp = minDistances.downcastInner<1>();
+//    fromDevice<float, 1>(tmp, min, stream);
+//    for (auto i = 0; i < nq; ++i)
+//        printf("minDistances[%d]: %f\n", i, min[i]);
 }
 
 void
@@ -516,20 +516,20 @@ runIVFFlatScanTile(Tensor<float, 2, true>& queries,
             );
       }
 
-      auto nq = outDistancesView.getSize(0);
-      auto len = outDistancesView.getSize(1);
-      printf("outDistancesView.nq, .len: %d, %d\n", nq, len);
-      assert(nq == 2);
-      float* ViewDistances = (float*)malloc(sizeof(float) * len * nq);
-
-      auto flat = outDistancesView.narrow(0, 0, 1).downcastInner<1>();
-      fromDevice<float, 1>(flat, ViewDistances, stream);
-
-      auto flat1 = outDistancesView.narrow(0, 1, 1).downcastInner<1>();
-      fromDevice<float, 1>(flat1, ViewDistances+len, stream);
-
-      for (auto i = 0; i < nq; ++i) 
-        printf("\t\t\tfirst: %f, last: %f\n", ViewDistances[i * len], ViewDistances[ (i+1) * len - 1]);
+//      auto nq = outDistancesView.getSize(0);
+//      auto len = outDistancesView.getSize(1);
+//      printf("outDistancesView.nq, .len: %d, %d\n", nq, len);
+//      assert(nq == 2);
+//      float* ViewDistances = (float*)malloc(sizeof(float) * len * nq);
+//
+//      auto flat = outDistancesView.narrow(0, 0, 1).downcastInner<1>();
+//      fromDevice<float, 1>(flat, ViewDistances, stream);
+//
+//      auto flat1 = outDistancesView.narrow(0, 1, 1).downcastInner<1>();
+//      fromDevice<float, 1>(flat1, ViewDistances+len, stream);
+//
+//      for (auto i = 0; i < nq; ++i) 
+//        printf("\t\t\tfirst: %f, last: %f\n", ViewDistances[i * len], ViewDistances[ (i+1) * len - 1]);
 
 //      printf("just run once loop\n");
 //      break;
