@@ -176,6 +176,16 @@ ivfFlatScan(Tensor<float, 2, true> queries,
                                    distanceOut);
 }
 
+__global__ void
+copyMinDistancePerQuery(Tensor<float, 2, true> minDistances,
+                        Tensor<float, 2, true> outDistances,
+                        int k) {
+    auto queryId = threadIdx.x;
+    float minDistance = outDistances[queryId][k-1];
+    minDistances[queryId][0] = minDistance;
+}
+
+
 void 
 runIVFFlatScanTileSlice(
                    /* input */
@@ -186,9 +196,10 @@ runIVFFlatScanTileSlice(
                    Tensor<float, 1, true>& allDistances,
                    Tensor<float, 3, true>& heapDistances,
                    Tensor<int, 3, true>& heapIndices,
+                   Tensor<float, 2, true>& minDistances,
                    int k,
                    faiss::MetricType metricType,
-                   float minDist,
+                   //float minDist,
                    /* output */
                    Tensor<float, 2, true>& outDistances,
                    Tensor<long, 2, true>& outIndices,
@@ -197,8 +208,8 @@ runIVFFlatScanTileSlice(
                     GpuResources* res
                    ) {
 
-    cudaMemset(heapDistances.data(), 0, heapDistances.numElements() * sizeof(float));
-    cudaMemset(heapIndices.data(), 0, heapIndices.numElements() * sizeof(int));
+    //cudaMemset(heapDistances.data(), 0, heapDistances.numElements() * sizeof(float));
+    //cudaMemset(heapIndices.data(), 0, heapIndices.numElements() * sizeof(int));
   //auto& mem = res->getMemoryManagerCurrentDevice();
 //    printf("heapDistances.shape: %d, %d, %d\n", heapDistances.getSize(0), heapDistances.getSize(1), heapDistances.getSize(2));
 //    printf("heapIndices.shape: %d, %d, %d\n", heapIndices.getSize(0), heapIndices.getSize(1), heapIndices.getSize(2));
@@ -211,7 +222,7 @@ runIVFFlatScanTileSlice(
                         metricToSortDirection(metricType),
                         heapDistances,
                         heapIndices,
-                        minDist,
+                        minDistances,
                         stream);
 
 //    float *heap = (float*)malloc(sizeof(float) * 2 * k);
@@ -232,16 +243,23 @@ runIVFFlatScanTileSlice(
     auto flatHeapDistances = heapDistances.downcastInner<2>();
     auto flatHeapIndices = heapIndices.downcastInner<2>();
 
-//    printf("flatHeapDistances.shape: %d, %d\n", flatHeapDistances.getSize(0), flatHeapDistances.getSize(1));
+    printf("flatHeapDistances.shape: %d, %d\n", flatHeapDistances.getSize(0), flatHeapDistances.getSize(1));
 
 //    if (flatHeapDistances.isContiguous()) printf("flatHeapDistances is contiguous\n");
 
-//    float *flat = (float*)malloc(sizeof(float) * 1 * k);
-//    fromDevice<float, 2>(flatHeapDistances, flat, stream);
-//    int *flatindice = (int*)malloc(sizeof(int) * 1 * k);
-//    fromDevice<int, 2>(flatHeapIndices, flatindice, stream);
-//    for (auto i = 0; i < 0 * k; ++i) 
-//        printf("{%d %f}\t\t", flatindice[i], flat[i]);
+    auto nq = heapDistances.getSize(0);
+    auto np2 = heapDistances.getSize(1);
+
+    float *flat = (float*)malloc(sizeof(float) * nq * np2 * k);
+    fromDevice<float, 2>(flatHeapDistances, flat, stream);
+    int *flatindice = (int*)malloc(sizeof(int) * nq * np2 * k);
+    fromDevice<int, 2>(flatHeapIndices, flatindice, stream);
+
+    for (auto i = 0; i < 0 * np2 * k; ++i)  {
+        auto index = 1 * np2 * k + i;
+        printf("{%d %f}\t\t", flatindice[index], flat[index]);
+    }
+    printf("\n");
 
 
     runPass2SelectLists(flatHeapDistances,
@@ -255,6 +273,35 @@ runIVFFlatScanTileSlice(
                         outDistances,
                         outIndices,
                         stream);
+
+//    float *out = (float*)malloc(sizeof(float) * nq * k);
+//    long *outindices = (long*)malloc(sizeof(long) * nq * k);
+//
+//    auto out0 = outDistances.narrow(0, 0, 1).downcastInner<1>();
+//    auto outi0 = outIndices.narrow(0, 0, 1).downcastInner<1>();
+//    fromDevice<float, 1>(out0, out, stream);
+//    fromDevice<long, 1>(outi0, outindices, stream);
+//
+//    auto out1 = outDistances.narrow(0, 1, 1).downcastInner<1>();
+//    auto outi1 = outIndices.narrow(0, 1, 1).downcastInner<1>();
+//    fromDevice<float, 1>(out1, out+k, stream);
+//    fromDevice<long, 1>(outi1, outindices+k, stream);
+//
+//    for (auto i = 0; i < 1 * k; ++i)  {
+//        auto index = 1 * k + i;
+//        printf("{%d %f}\t\t", outindices[index], out[index]);
+//    }
+//    printf("\n");
+
+    // Copy the kth distance into minDistances
+    //auto nq = outDistances.getSize(0);
+    copyMinDistancePerQuery<<<1, nq, 0, stream>>>(minDistances, outDistances, k);
+
+    auto min = (float*)malloc(sizeof(float) * nq);
+auto tmp = minDistances.downcastInner<1>();
+    fromDevice<float, 1>(tmp, min, stream);
+    for (auto i = 0; i < nq; ++i)
+        printf("minDistances[%d]: %f\n", i, min[i]);
 }
 
 void
@@ -271,6 +318,7 @@ runIVFFlatScanTile(Tensor<float, 2, true>& queries,
                    Tensor<int, 3, true>& heapIndices,
                    Tensor<float, 3, true>& lastHeapDistances,
                    Tensor<int, 3, true>& lastHeapIndices,
+                   Tensor<float, 2, true>& minDistances,
                    int k,
                    faiss::MetricType metricType,
                    bool useResidual,
@@ -421,13 +469,13 @@ runIVFFlatScanTile(Tensor<float, 2, true>& queries,
 
   const int64_t max_slice_size = 2048;
   int64_t slice_size = 2048;
-  float minDist = 0.0;
+  //float minDist = 0.0;
   for (int64_t slice_start = 0; slice_start < k; slice_start += slice_size) {
       if (slice_start + max_slice_size <= k) slice_size = max_slice_size;
       else slice_size = k - slice_start;
 
-      printf("k:%d, i: %ld, slice_size: %ld, minDist: %f\n", k, slice_start, slice_size, minDist);
-
+      //printf("k:%d, i: %ld, slice_size: %ld, minDist: %f\n", k, slice_start, slice_size, minDist);
+      printf("k:%d, i: %ld, slice_size: %ld\n", k, slice_start, slice_size);
 
       auto outDistancesView = outDistances.narrow(1, slice_start, slice_size);
       auto outIndicesView = outIndices.narrow(1, slice_start, slice_size);
@@ -441,9 +489,9 @@ runIVFFlatScanTile(Tensor<float, 2, true>& queries,
             allDistances,
             lastHeapDistances,
             lastHeapIndices,
+            minDistances,
             slice_size,
             metricType,
-            minDist,
             outDistancesView,
             outIndicesView,
             stream,
@@ -458,9 +506,9 @@ runIVFFlatScanTile(Tensor<float, 2, true>& queries,
             allDistances,
             heapDistances,
             heapIndices,
+            minDistances,
             slice_size,
             metricType,
-            minDist,
             outDistancesView,
             outIndicesView,
             stream,
@@ -468,16 +516,26 @@ runIVFFlatScanTile(Tensor<float, 2, true>& queries,
             );
       }
 
-      
-      float maxDist;
-      auto maxOutDistancesView = outDistancesView.narrow(1, 0, 1);
-      fromDevice<float, 2>(maxOutDistancesView, &maxDist, stream);
-      printf("max dist: %f\n", maxDist);
-      
-      auto minOutDistancesView = outDistancesView.narrow(1, slice_size - 1, 1);
-      fromDevice<float, 2>(minOutDistancesView, &minDist, stream);
-      printf("topk dist: %f\n", minDist);
+      auto nq = outDistancesView.getSize(0);
+      auto len = outDistancesView.getSize(1);
+      printf("outDistancesView.nq, .len: %d, %d\n", nq, len);
+      assert(nq == 2);
+      float* ViewDistances = (float*)malloc(sizeof(float) * len * nq);
+
+      auto flat = outDistancesView.narrow(0, 0, 1).downcastInner<1>();
+      fromDevice<float, 1>(flat, ViewDistances, stream);
+
+      auto flat1 = outDistancesView.narrow(0, 1, 1).downcastInner<1>();
+      fromDevice<float, 1>(flat1, ViewDistances+len, stream);
+
+      for (auto i = 0; i < nq; ++i) 
+        printf("\t\t\tfirst: %f, last: %f\n", ViewDistances[i * len], ViewDistances[ (i+1) * len - 1]);
+
+//      printf("just run once loop\n");
+//      break;
   }
+
+  printf("runIVFFlatScanTile finish\n");
 
 //  // auto min_dist = 2.58573;
 //  auto min_dist = 0.0; 
@@ -695,6 +753,13 @@ runIVFFlatScanLargeK(Tensor<float, 2, true>& queries,
   DeviceTensor<int, 3, true>* lastHeapIndices[2] =
     {&lastHeapIndices1, &lastHeapIndices2};
 
+  DeviceTensor<float, 2, true> minDistances1(
+    mem, {queryTileSize, 1}, stream);
+  DeviceTensor<float, 2, true> minDistances2(
+    mem, {queryTileSize, 1}, stream);
+  DeviceTensor<float, 2, true>* minDistances[2] =
+    {&minDistances1, &minDistances2};
+
   auto streams = res->getAlternateStreamsCurrentDevice();
   streamWait(streams, {stream});
 
@@ -724,6 +789,9 @@ runIVFFlatScanLargeK(Tensor<float, 2, true>& queries,
     auto lastHeapIndicesView =
       lastHeapIndices[curStream]->narrowOutermost(0, numQueriesInTile);
 
+    auto minDistancesView = 
+      minDistances[curStream]->narrowOutermost(0, numQueriesInTile);
+
     auto outDistanceView =
       outDistances.narrowOutermost(query, numQueriesInTile);
     auto outIndicesView =
@@ -742,6 +810,7 @@ runIVFFlatScanLargeK(Tensor<float, 2, true>& queries,
                        heapIndicesView,
                        lastHeapDistancesView,
                        lastHeapIndicesView,
+                       minDistancesView,
                        k,
                        metric,
                        useResidual,

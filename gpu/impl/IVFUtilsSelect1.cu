@@ -28,8 +28,7 @@ pass1SelectLists(Tensor<int, 2, true> prefixSumOffsets,
                  int nprobe,
                  int k,
                  Tensor<float, 3, true> heapDistances,
-                 Tensor<int, 3, true> heapIndices,
-                 float min_dist) {
+                 Tensor<int, 3, true> heapIndices) {
   constexpr int kNumWarps = ThreadsPerBlock / kWarpSize;
 
   __shared__ float smemK[kNumWarps * NumWarpQ];
@@ -63,15 +62,12 @@ pass1SelectLists(Tensor<int, 2, true> prefixSumOffsets,
   // BlockSelect add cannot be used in a warp divergent circumstance; we
   // handle the remainder warp below
   for (; i < limit; i += blockDim.x) {
-      if (distanceStart[i] > min_dist) {
-        heap.addThreadQ(distanceStart[i], start + i);
-      }
+      heap.addThreadQ(distanceStart[i], start + i);
       heap.checkThreadQ();
   }
 
   // Handle warp divergence separately
   if (i < num) {
-      if (distanceStart[i] > min_dist)
         heap.addThreadQ(distanceStart[i], start + i);
   }
 
@@ -81,11 +77,11 @@ pass1SelectLists(Tensor<int, 2, true> prefixSumOffsets,
   // Write out the final k-selected values; they should be all
   // together
   for (int i = threadIdx.x; i < k; i += blockDim.x) {
-    //printf("smem: %f\t", smemK[i]);
     heapDistances[queryId][sliceId][i] = smemK[i];
     heapIndices[queryId][sliceId][i] = smemV[i];
   }
 }
+
 
 void
 runPass1SelectLists(Tensor<int, 2, true>& prefixSumOffsets,
@@ -109,8 +105,7 @@ runPass1SelectLists(Tensor<int, 2, true>& prefixSumOffsets,
                                    nprobe,                              \
                                    k,                                   \
                                    heapDistances,                       \
-                                   heapIndices,                         \
-                                   0.0);                                \
+                                   heapIndices);                        \
     CUDA_TEST_ERROR();                                                  \
     return; /* success */                                               \
   } while (0)
@@ -172,6 +167,80 @@ runPass1SelectLists(Tensor<int, 2, true>& prefixSumOffsets,
 #undef RUN_PASS
 }
 
+
+template <int ThreadsPerBlock, int NumWarpQ, int NumThreadQ, bool Dir>
+__global__ void
+pass1SelectListsLimitDistance(Tensor<int, 2, true> prefixSumOffsets,
+                              Tensor<float, 1, true> distance,
+                              int nprobe,
+                              int k,
+                              Tensor<float, 3, true> heapDistances,
+                              Tensor<int, 3, true> heapIndices,
+                              Tensor<float, 2, true> minDistances
+                              ) {
+  constexpr int kNumWarps = ThreadsPerBlock / kWarpSize;
+
+  __shared__ float smemK[kNumWarps * NumWarpQ];
+  __shared__ int smemV[kNumWarps * NumWarpQ];
+
+  constexpr auto kInit = Dir ? kFloatMin : kFloatMax;
+  BlockSelect<float, int, Dir, Comparator<float>,
+              NumWarpQ, NumThreadQ, ThreadsPerBlock>
+    heap(kInit, -1, smemK, smemV, k);
+
+  auto queryId = blockIdx.y;
+  auto sliceId = blockIdx.x;
+  auto numSlices = gridDim.x;
+
+  // cause crash if parameter minDistances pass reference
+  float min_dist = minDistances[queryId][0];
+  //printf("kernel: %f\t", min_dist);
+  //float min_dist = 0.0;
+
+  int sliceSize = (nprobe / numSlices);
+  int sliceStart = sliceSize * sliceId;
+  int sliceEnd = sliceId == (numSlices - 1) ? nprobe :
+    sliceStart + sliceSize;
+  auto offsets = prefixSumOffsets[queryId].data();
+
+  // We ensure that before the array (at offset -1), there is a 0 value
+  int start = *(&offsets[sliceStart] - 1);
+  int end = offsets[sliceEnd - 1];
+
+  int num = end - start;
+  int limit = utils::roundDown(num, kWarpSize);
+
+  int i = threadIdx.x;
+  auto distanceStart = distance[start].data();
+
+  // BlockSelect add cannot be used in a warp divergent circumstance; we
+  // handle the remainder warp below
+  for (; i < limit; i += blockDim.x) {
+      // TODO: use the kth distance instead
+      if (distanceStart[i] > min_dist) {
+        heap.addThreadQ(distanceStart[i], start + i);
+      }
+      heap.checkThreadQ();
+  }
+
+  // Handle warp divergence separately
+  if (i < num) {
+      if (distanceStart[i] > min_dist)
+        heap.addThreadQ(distanceStart[i], start + i);
+  }
+
+  // Merge all final results
+  heap.reduce();
+
+  // Write out the final k-selected values; they should be all
+  // together
+  for (int i = threadIdx.x; i < k; i += blockDim.x) {
+    //printf("smem: %f\t", smemK[i]);
+    heapDistances[queryId][sliceId][i] = smemK[i];
+    heapIndices[queryId][sliceId][i] = smemV[i];
+  }
+}
+
 void
 runPass1SelectLists(Tensor<int, 2, true>& prefixSumOffsets,
                     Tensor<float, 1, true>& distance,
@@ -180,7 +249,7 @@ runPass1SelectLists(Tensor<int, 2, true>& prefixSumOffsets,
                     bool chooseLargest,
                     Tensor<float, 3, true>& heapDistances,
                     Tensor<int, 3, true>& heapIndices,
-                    float min_dist,
+                    Tensor<float, 2, true>& minDistances,
                     cudaStream_t stream) {
   // This is caught at a higher level
   FAISS_ASSERT(k <= GPU_MAX_SELECTION_K);
@@ -189,14 +258,14 @@ runPass1SelectLists(Tensor<int, 2, true>& prefixSumOffsets,
 
 #define RUN_PASS(BLOCK, NUM_WARP_Q, NUM_THREAD_Q, DIR)                  \
   do {                                                                  \
-    pass1SelectLists<BLOCK, NUM_WARP_Q, NUM_THREAD_Q, DIR>              \
+    pass1SelectListsLimitDistance<BLOCK, NUM_WARP_Q, NUM_THREAD_Q, DIR>              \
       <<<grid, BLOCK, 0, stream>>>(prefixSumOffsets,                    \
                                    distance,                            \
                                    nprobe,                              \
                                    k,                                   \
                                    heapDistances,                       \
                                    heapIndices,                         \
-                                   min_dist);                           \
+                                   minDistances);                       \
     CUDA_TEST_ERROR();                                                  \
     return; /* success */                                               \
   } while (0)

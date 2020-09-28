@@ -42,7 +42,8 @@ void runPass1SelectLists(Tensor<int, 2, true>& prefixSumOffsets,
                          bool chooseLargest,
                          Tensor<float, 3, true>& heapDistances,
                          Tensor<int, 3, true>& heapIndices,
-                         float min_dist,
+                         Tensor<float, 2, true>& minDistances,
+                         //float min_dist,
                          cudaStream_t stream);
 
 
