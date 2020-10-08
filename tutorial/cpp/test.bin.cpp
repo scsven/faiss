@@ -292,8 +292,8 @@ int main() {
 
     auto kkkkkk = 10000;
 
-    test<GPUTestIndex>("gpu-index.data", "gpu-result.data", res, base, queries, kkkkkk);
-    test<CPUTestIndex>("cpu-index.data", "cpu-result.data", res, base, queries, kkkkkk);
+    test<GPUTestIndex>("gpu-index.data", "./results/gpu-result.data", res, base, queries, kkkkkk);
+    test<CPUTestIndex>("cpu-index.data", "./results/cpu-result.data", res, base, queries, kkkkkk);
 
     return 0;
 }
