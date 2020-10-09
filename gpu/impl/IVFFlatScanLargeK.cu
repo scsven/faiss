@@ -791,6 +791,7 @@ runIVFFlatScanLargeK(Tensor<float, 2, true>& queries,
 
     auto minDistancesView = 
       minDistances[curStream]->narrowOutermost(0, numQueriesInTile);
+    minDistances[curStream]->zero(streams[curStream]);
 
     auto outDistanceView =
       outDistances.narrowOutermost(query, numQueriesInTile);

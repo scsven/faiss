@@ -80,7 +80,7 @@ save_result(std::pair<std::vector<float>, std::vector<long>> result, int64_t top
     auto nq = ids.size() / topk;
     for (size_t i = 0; i < nq; ++i) {
         auto path = bpath + "_" + std::to_string(i);
-        std::cout << "save result to " << path << std::endl;
+        std::cout << "\rsave result to " << path;
         std::ofstream out(path.c_str(), std::ios::out);
         out << std::fixed;
         for (size_t j = 0; j < topk; ++j) {
@@ -89,6 +89,7 @@ save_result(std::pair<std::vector<float>, std::vector<long>> result, int64_t top
         out << "==================" << std::endl; 
         out.close();
     }
+    std::cout << std::endl;
 }
 
 class TestIndex {
