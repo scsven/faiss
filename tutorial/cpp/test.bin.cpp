@@ -28,7 +28,7 @@
 using namespace faiss;
 
 bool file_exist(const std::string& path) {
-    return false;
+//    return false;
     std::ifstream f(path.c_str());
     return f.good();
 }
@@ -37,7 +37,7 @@ std::vector<float>
 generate_vector(int64_t n, int64_t d) {
     /* 100 million limitation */
     const int64_t nlimit = 100 * 1000 * 1000; 
-    const int64_t dlimit = 128; 
+    const int64_t dlimit = 256; 
     assert(n < nlimit);
     assert(d < dlimit);
 
@@ -223,10 +223,10 @@ class GPUTestIndex : public TestIndex {
 
 
 
-const int64_t nb = 100000;
-const int64_t nq = 1000;
-const int64_t d = 32;
-const int64_t nlist = 300;
+const int64_t nb = 1000000;
+const int64_t nq = 10000;
+const int64_t d = 128;
+const int64_t nlist = 256;
 
 
 template<typename T>

@@ -9,6 +9,7 @@
 *~
 *.data
 *.bin
+depend
 
 /config.*
 /aclocal.m4
